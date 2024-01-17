@@ -45,7 +45,7 @@ class DataMgrBufferProvider : public BufferProvider {
                          const int8_t* host_ptr,
                          const size_t num_bytes,
                          const int device_id) const override;
-  void synchronizeStream(const int device_id) const override;
+  void synchronizeDeviceDataStream(const int device_id) const override;
   void copyFromDevice(int8_t* host_ptr,
                       const int8_t* device_ptr,
                       const size_t num_bytes,

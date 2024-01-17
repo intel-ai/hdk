@@ -58,6 +58,7 @@ class GpuAllocator : public DeviceAllocator {
   void setDeviceMem(int8_t* device_ptr,
                     unsigned char uc,
                     const size_t num_bytes) const override;
+  void sync() override;
 
  private:
   std::vector<Data_Namespace::AbstractBuffer*> owned_buffers_;

@@ -352,6 +352,7 @@ std::vector<int64_t*> QueryExecutionContext::launchGpuCode(
               << " ms";
       launchClock->start();
     }
+    auto timer_kernel = DEBUG_TIMER("Actual kernel");
     kernel->launch(ko, kernel_params);
 
     if (executor_->getConfig().exec.watchdog.enable_dynamic || allow_runtime_interrupt) {
@@ -365,6 +366,7 @@ std::vector<int64_t*> QueryExecutionContext::launchGpuCode(
     gpu_allocator_->copyFromDevice(reinterpret_cast<int8_t*>(error_codes.data()),
                                    reinterpret_cast<int8_t*>(err_desc),
                                    error_codes.size() * sizeof(error_codes[0]));
+    timer_kernel.stop();
     *error_code = aggregate_error_codes(error_codes);
     if (*error_code > 0) {
       return {};
@@ -858,9 +860,9 @@ QueryExecutionContext::prepareKernelParams(
 
   const uint64_t num_fragments = static_cast<uint64_t>(col_buffers.size());
   const size_t col_count{num_fragments > 0 ? col_buffers.front().size() : 0};
+  std::vector<int8_t*> multifrag_col_dev_buffers;
+  std::vector<const int8_t*> flatened_col_buffers;
   if (col_count) {
-    std::vector<int8_t*> multifrag_col_dev_buffers;
-    std::vector<const int8_t*> flatened_col_buffers;
     std::vector<size_t> col_buffs_offsets;
     for (auto& buffers : col_buffers) {
       flatened_col_buffers.insert(
@@ -959,6 +961,7 @@ QueryExecutionContext::prepareKernelParams(
            reinterpret_cast<std::uintptr_t>(kernel_metadata_gpu_buf->getMemoryPtr() +
                                             alloc_size));
   CHECK_EQ(nullptr, params[GROUPBY_BUF]);
-  buffer_provider->synchronizeStream(device_id);
+  buffer_provider->synchronizeDeviceDataStream(device_id);
+
   return {params, kernel_metadata_gpu_buf};
 }

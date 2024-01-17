@@ -16,7 +16,9 @@
 #pragma once
 
 #include <iostream>
+#include <list>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "DataMgr/GpuMgr.h"
@@ -57,19 +59,63 @@ class L0CommandList;
 class L0CommandQueue;
 
 class L0Device {
- private:
+ protected:
+  const L0Driver& driver_;
+  std::shared_ptr<L0CommandQueue> command_queue_;
 #ifdef HAVE_L0
   ze_device_handle_t device_;
   ze_device_properties_t props_;
   ze_device_compute_properties_t compute_props_;
 #endif
+ private:
+  /*
+    This component for data fetching to L0 devices is used for
+    more efficient asynchronous data transfers. It allows to amortize
+    the costs of data transfers which is especially useful in case of
+    many relatively small data transfers.
+  */
+  class L0DataFetcher {
+#ifdef HAVE_L0
+    static constexpr size_t GRAVEYARD_LIMIT{500};
+    static constexpr size_t CL_BYTES_LIMIT{128 * 1024 * 1024};
+    static constexpr ze_command_list_desc_t cl_desc_ = {
+        ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC,
+        nullptr,
+        0,
+        ZE_COMMAND_LIST_FLAG_MAXIMIZE_THROUGHPUT};
+    struct CLBytesTracker {
+      ze_command_list_handle_t cl_handle_;
+      uint64_t bytes_;
+    };
+    CLBytesTracker cur_cl_bytes_;
+    ze_command_queue_handle_t queue_handle_;
+    std::list<ze_command_list_handle_t> graveyard_;
+    std::list<ze_command_list_handle_t> recycled_;
+    std::mutex cur_cl_lock_;
+#endif
+    L0Device& my_device_;
+    void recycleGraveyard();
+    void setCLRecycledOrNew();
 
-  const L0Driver& driver_;
-  std::shared_ptr<L0CommandQueue> command_queue_;
+   public:
+    void appendCopyCommand(void* dst, const void* src, const size_t num_bytes);
+    void sync();
+
+#ifdef HAVE_L0
+    L0DataFetcher(L0Device& device);
+    ~L0DataFetcher();
+#else
+    L0DataFetcher() = default;
+#endif
+  };
+  L0DataFetcher data_fetcher_;
 
  public:
   std::shared_ptr<L0CommandQueue> command_queue() const;
   std::unique_ptr<L0CommandList> create_command_list() const;
+
+  void transferToDevice(void* dst, const void* src, const size_t num_bytes);
+  void syncDataTransfers();
 
   std::shared_ptr<L0Module> create_module(uint8_t* code,
                                           size_t len,
@@ -169,7 +215,6 @@ class L0CommandList {
 
  public:
   void copy(void* dst, const void* src, const size_t num_bytes);
-
   template <typename... Args>
   void launch(L0Kernel& kernel, const GroupCount& gc, Args&&... args) {
 #ifdef HAVE_L0
@@ -202,13 +247,15 @@ class L0Manager : public GpuMgr {
   void copyHostToDeviceAsync(int8_t* device_ptr,
                              const int8_t* host_ptr,
                              const size_t num_bytes,
-                             const int device_num) override {
-    CHECK(false);
-  }
-  void synchronizeStream(const int device_num) override {
-    LOG(WARNING)
-        << "L0 has no async data transfer enabled, synchronizeStream() has no effect";
-  }
+                             const int device_num) override;
+
+  void copyHostToDeviceAsyncIfPossible(int8_t* device_ptr,
+                                       const int8_t* host_ptr,
+                                       const size_t num_bytes,
+                                       const int device_num) override;
+
+  void synchronizeDeviceDataStream(const int device_num) override;
+
   void copyHostToDevice(int8_t* device_ptr,
                         const int8_t* host_ptr,
                         const size_t num_bytes,
@@ -261,7 +308,7 @@ class L0Manager : public GpuMgr {
 
  private:
   std::vector<std::shared_ptr<L0Driver>> drivers_;
-  static constexpr bool async_data_load_available{false};
+  static constexpr bool async_data_load_available{true};
 };
 
 }  // namespace l0

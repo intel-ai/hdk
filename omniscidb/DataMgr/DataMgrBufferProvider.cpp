@@ -57,18 +57,14 @@ void DataMgrBufferProvider::copyToDeviceAsyncIfPossible(int8_t* device_ptr,
   CHECK(data_mgr_);
   const auto gpu_mgr = data_mgr_->getGpuMgr();
   CHECK(gpu_mgr);
-  if (gpu_mgr->canLoadAsync()) {
-    gpu_mgr->copyHostToDeviceAsync(device_ptr, host_ptr, num_bytes, device_id);
-  } else {
-    gpu_mgr->copyHostToDevice(device_ptr, host_ptr, num_bytes, device_id);
-  }
+  gpu_mgr->copyHostToDeviceAsyncIfPossible(device_ptr, host_ptr, num_bytes, device_id);
 }
 
-void DataMgrBufferProvider::synchronizeStream(const int device_num) const {
+void DataMgrBufferProvider::synchronizeDeviceDataStream(const int device_num) const {
   CHECK(data_mgr_);
   const auto gpu_mgr = data_mgr_->getGpuMgr();
   CHECK(gpu_mgr);
-  gpu_mgr->synchronizeStream(device_num);
+  gpu_mgr->synchronizeDeviceDataStream(device_num);
 }
 
 void DataMgrBufferProvider::copyFromDevice(int8_t* host_ptr,

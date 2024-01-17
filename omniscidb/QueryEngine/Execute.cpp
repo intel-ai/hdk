@@ -21,6 +21,7 @@
 #include "QueryEngine/Execute.h"
 
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
+#include <tbb/parallel_for.h>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
 
@@ -2877,7 +2878,7 @@ std::map<size_t, std::vector<uint64_t>> get_table_id_to_frag_offsets(
 std::pair<std::vector<std::vector<int64_t>>, std::vector<std::vector<uint64_t>>>
 Executor::getRowCountAndOffsetForAllFrags(
     const RelAlgExecutionUnit& ra_exe_unit,
-    const CartesianProduct<std::vector<std::vector<size_t>>>& frag_ids_crossjoin,
+    const std::vector<std::vector<size_t>>& frag_ids_crossjoin,
     const std::vector<InputDescriptor>& input_descs,
     const std::map<TableRef, const TableFragments*>& all_tables_fragments) {
   std::vector<std::vector<int64_t>> all_num_rows;
@@ -2990,80 +2991,161 @@ FetchResult Executor::fetchChunks(
   std::vector<std::vector<const int8_t*>> all_frag_col_buffers;
   std::vector<std::vector<int64_t>> all_num_rows;
   std::vector<std::vector<uint64_t>> all_frag_offsets;
-  for (const auto& selected_frag_ids : frag_ids_crossjoin) {
-    std::vector<const int8_t*> frag_col_buffers(
-        plan_state_->global_to_local_col_ids_.size());
-    for (const auto& col_id : col_global_ids) {
-      if (interrupted_.load()) {
-        throw QueryExecutionError(ERR_INTERRUPTED);
-      }
-      CHECK(col_id);
-      if (col_id->isVirtual()) {
-        continue;
-      }
-      const auto fragments_it = all_tables_fragments.find(col_id->getTableRef());
-      CHECK(fragments_it != all_tables_fragments.end());
-      const auto fragments = fragments_it->second;
-      auto it = plan_state_->global_to_local_col_ids_.find(*col_id);
-      CHECK(it != plan_state_->global_to_local_col_ids_.end());
-      CHECK_LT(static_cast<size_t>(it->second),
-               plan_state_->global_to_local_col_ids_.size());
-      const size_t frag_id = selected_frag_ids[local_col_to_frag_pos[it->second]];
-      if (!fragments->size()) {
-        return {};
-      }
-      auto memory_level_for_column = memory_level;
-      if (plan_state_->columns_to_fetch_.find(*col_id) ==
-          plan_state_->columns_to_fetch_.end()) {
-        memory_level_for_column = Data_Namespace::CPU_LEVEL;
-      }
-      if (needFetchAllFragments(*col_id, ra_exe_unit, selected_fragments)) {
-        // determine if we need special treatment to linearlize multi-frag table
-        // i.e., a column that is classified as varlen type, i.e., array
-        // for now, we can support more types in this way
-        if (needLinearizeAllFragments(
-                *col_id, ra_exe_unit, selected_fragments, memory_level)) {
-          bool for_lazy_fetch = false;
-          if (plan_state_->columns_to_not_fetch_.find(*col_id) !=
-              plan_state_->columns_to_not_fetch_.end()) {
-            for_lazy_fetch = true;
-            VLOG(2) << "Try to linearize lazy fetch column (col_id: "
-                    << col_id->getColId() << ")";
-          }
-          frag_col_buffers[it->second] = column_fetcher.linearizeColumnFragments(
-              col_id->getColInfo(),
-              all_tables_fragments,
-              chunks,
-              chunk_iterators,
-              for_lazy_fetch ? Data_Namespace::CPU_LEVEL : memory_level,
-              for_lazy_fetch ? 0 : device_id,
-              device_allocator,
-              thread_idx);
-        } else {
-          frag_col_buffers[it->second] =
-              column_fetcher.getAllTableColumnFragments(col_id->getColInfo(),
-                                                        all_tables_fragments,
-                                                        memory_level_for_column,
-                                                        device_id,
-                                                        device_allocator,
-                                                        thread_idx);
+
+  auto fetch_column_callback = [&](std::shared_ptr<const InputColDescriptor> col_id,
+                                   const std::vector<size_t>& selected_frag_ids,
+                                   std::vector<const int8_t*>& frag_col_buffers,
+                                   const bool parallelized =
+                                       false) -> bool /*empty_frag*/ {
+    if (interrupted_.load()) {
+      throw QueryExecutionError(ERR_INTERRUPTED);
+    }
+    const auto fragments_it = all_tables_fragments.find(col_id->getTableRef());
+    CHECK(fragments_it != all_tables_fragments.end());
+    const auto fragments = fragments_it->second;
+    auto it = plan_state_->global_to_local_col_ids_.find(*col_id);
+    CHECK(it != plan_state_->global_to_local_col_ids_.end());
+    CHECK_LT(static_cast<size_t>(it->second),
+             plan_state_->global_to_local_col_ids_.size());
+    const size_t frag_id = selected_frag_ids[local_col_to_frag_pos[it->second]];
+    if (!fragments->size()) {
+      return true;
+    }
+    auto memory_level_for_column = memory_level;
+    if (plan_state_->columns_to_fetch_.find(*col_id) ==
+        plan_state_->columns_to_fetch_.end()) {
+      memory_level_for_column = Data_Namespace::CPU_LEVEL;
+    }
+    if (needFetchAllFragments(*col_id, ra_exe_unit, selected_fragments)) {
+      // determine if we need special treatment to linearlize multi-frag table
+      // i.e., a column that is classified as varlen type, i.e., array
+      // for now, we can support more types in this way
+
+      // If fetch_column_callback is called from parallel code region, we get deadlocks
+      // due to tbb nested parallel_for, the calls below are internally parallelized. We
+      // should land here when called from a sequential code region
+      CHECK(!parallelized);
+      if (needLinearizeAllFragments(
+              *col_id, ra_exe_unit, selected_fragments, memory_level)) {
+        bool for_lazy_fetch = false;
+        if (plan_state_->columns_to_not_fetch_.find(*col_id) !=
+            plan_state_->columns_to_not_fetch_.end()) {
+          for_lazy_fetch = true;
+          VLOG(2) << "Try to linearize lazy fetch column (col_id: " << col_id->getColId()
+                  << ")";
         }
+        frag_col_buffers[it->second] = column_fetcher.linearizeColumnFragments(
+            col_id->getColInfo(),
+            all_tables_fragments,
+            chunks,
+            chunk_iterators,
+            for_lazy_fetch ? Data_Namespace::CPU_LEVEL : memory_level,
+            for_lazy_fetch ? 0 : device_id,
+            device_allocator);
       } else {
         frag_col_buffers[it->second] =
-            column_fetcher.getOneTableColumnFragment(col_id->getColInfo(),
-                                                     frag_id,
-                                                     all_tables_fragments,
-                                                     chunks,
-                                                     chunk_iterators,
-                                                     memory_level_for_column,
-                                                     device_id,
-                                                     device_allocator);
+            column_fetcher.getAllTableColumnFragments(col_id->getColInfo(),
+                                                      all_tables_fragments,
+                                                      memory_level_for_column,
+                                                      device_id,
+                                                      device_allocator,
+                                                      thread_idx);
+      }
+    } else {
+      frag_col_buffers[it->second] =
+          column_fetcher.getOneTableColumnFragment(col_id->getColInfo(),
+                                                   frag_id,
+                                                   all_tables_fragments,
+                                                   chunks,
+                                                   chunk_iterators,
+                                                   memory_level_for_column,
+                                                   device_id,
+                                                   device_allocator);
+    }
+    return false;
+  };
+
+  // in MT fetching for GPU, we want to preserve "the order of insertion" into
+  // all_frag_col_buffers
+  std::vector<std::vector<size_t>> selected_frag_ids_vec;
+  if (memory_level == Data_Namespace::MemoryLevel::GPU_LEVEL) {
+    std::atomic<bool> empty_frags{false};
+    tbb::task_arena limitedArena(8);
+    std::vector<size_t> idx_frags_to_inearize;
+    for (const auto& selected_frag_ids : frag_ids_crossjoin) {
+      selected_frag_ids_vec.push_back(selected_frag_ids);
+      for (const auto& col_id : col_global_ids) {
+        CHECK(col_id);
+        if (!col_id->isVirtual() &&
+            needFetchAllFragments(*col_id, ra_exe_unit, selected_fragments)) {
+          idx_frags_to_inearize.push_back(selected_frag_ids_vec.size() - 1);
+        }
       }
     }
-    all_frag_col_buffers.push_back(frag_col_buffers);
+    all_frag_col_buffers.resize(selected_frag_ids_vec.size());
+
+    // Try MT fetching for frags that do not need linearization
+    limitedArena.execute([&]() {
+      tbb::parallel_for(
+          tbb::blocked_range<size_t>(0, selected_frag_ids_vec.size()), [&](auto r) {
+            for (size_t idx = r.begin(); idx != r.end(); ++idx) {
+              if (std::find(idx_frags_to_inearize.begin(),
+                            idx_frags_to_inearize.end(),
+                            idx) == idx_frags_to_inearize.end()) {
+                const auto& selected_frag_ids = selected_frag_ids_vec[idx];
+                std::vector<const int8_t*> frag_col_buffers(
+                    plan_state_->global_to_local_col_ids_.size());
+                for (const auto& col_id : col_global_ids) {
+                  CHECK(col_id);
+                  if (!col_id->isVirtual() &&
+                      fetch_column_callback(
+                          col_id, selected_frag_ids, frag_col_buffers, true)) {
+                    empty_frags = true;  // not virtual, but empty frags
+                    tbb::task::current_context()->cancel_group_execution();
+                  }
+                }
+                all_frag_col_buffers[idx] = frag_col_buffers;
+              }
+            }
+          });
+    });
+    if (empty_frags) {
+      return {};
+    }
+    for (const size_t idx :
+         idx_frags_to_inearize) {  // linear frags materialization is already
+                                   // parallelized, avoid nested tbb
+      const auto& selected_frag_ids = selected_frag_ids_vec[idx];
+      std::vector<const int8_t*> frag_col_buffers(
+          plan_state_->global_to_local_col_ids_.size());
+      for (const auto& col_id : col_global_ids) {
+        CHECK(col_id);
+        if (!col_id->isVirtual() &&
+            fetch_column_callback(col_id, selected_frag_ids, frag_col_buffers)) {
+          return {};  // not virtual, but empty frags
+        }
+      }
+      all_frag_col_buffers[idx] = frag_col_buffers;
+    }
+  } else {
+    for (const auto& selected_frag_ids : frag_ids_crossjoin) {
+      std::vector<const int8_t*> frag_col_buffers(
+          plan_state_->global_to_local_col_ids_.size());
+      for (const auto& col_id : col_global_ids) {
+        CHECK(col_id);
+        if (!col_id->isVirtual() &&
+            fetch_column_callback(col_id, selected_frag_ids, frag_col_buffers)) {
+          return {};  // not virtual, but empty frags
+        }
+      }
+      selected_frag_ids_vec.push_back(selected_frag_ids);
+      all_frag_col_buffers.push_back(frag_col_buffers);
+    }
   }
+  // selected_frag_ids_vec here is just a vector representation of frag_ids_crossjoin
+  // we need it in this form to have a proper fragment order when doing MT fetching to GPU
   std::tie(all_num_rows, all_frag_offsets) = getRowCountAndOffsetForAllFrags(
-      ra_exe_unit, frag_ids_crossjoin, ra_exe_unit.input_descs, all_tables_fragments);
+      ra_exe_unit, selected_frag_ids_vec, ra_exe_unit.input_descs, all_tables_fragments);
   return {all_frag_col_buffers, all_num_rows, all_frag_offsets};
 }
 
@@ -3087,6 +3169,7 @@ FetchResult Executor::fetchUnionChunks(
   std::vector<std::vector<const int8_t*>> all_frag_col_buffers;
   std::vector<std::vector<int64_t>> all_num_rows;
   std::vector<std::vector<uint64_t>> all_frag_offsets;
+  std::vector<std::vector<size_t>> selected_frag_ids_vec;
 
   CHECK(!selected_fragments.empty());
   CHECK_LE(2u, ra_exe_unit.input_descs.size());
@@ -3185,12 +3268,16 @@ FetchResult Executor::fetchUnionChunks(
                                                        device_allocator);
         }
       }
+      selected_frag_ids_vec.push_back(selected_frag_ids);
       all_frag_col_buffers.push_back(frag_col_buffers);
     }
     std::vector<std::vector<int64_t>> num_rows;
     std::vector<std::vector<uint64_t>> frag_offsets;
-    std::tie(num_rows, frag_offsets) = getRowCountAndOffsetForAllFrags(
-        ra_exe_unit, frag_ids_crossjoin, ra_exe_unit.input_descs, all_tables_fragments);
+    std::tie(num_rows, frag_offsets) =
+        getRowCountAndOffsetForAllFrags(ra_exe_unit,
+                                        selected_frag_ids_vec,
+                                        ra_exe_unit.input_descs,
+                                        all_tables_fragments);
     all_num_rows.insert(all_num_rows.end(), num_rows.begin(), num_rows.end());
     all_frag_offsets.insert(
         all_frag_offsets.end(), frag_offsets.begin(), frag_offsets.end());

@@ -59,7 +59,6 @@ std::pair<const int8_t*, size_t> ColumnFetcher::getOneColumnFragment(
     const Data_Namespace::MemoryLevel effective_mem_lvl,
     const int device_id,
     DeviceAllocator* device_allocator,
-    const size_t thread_idx,
     std::vector<std::shared_ptr<Chunk_NS::Chunk>>& chunks_owner,
     DataProvider* data_provider,
     ColumnCacheMap& column_cache) {
@@ -115,7 +114,6 @@ JoinColumn ColumnFetcher::makeJoinColumn(
     const Data_Namespace::MemoryLevel effective_mem_lvl,
     const int device_id,
     DeviceAllocator* device_allocator,
-    const size_t thread_idx,
     std::vector<std::shared_ptr<Chunk_NS::Chunk>>& chunks_owner,
     std::vector<std::shared_ptr<void>>& malloc_owner,
     DataProvider* data_provider,
@@ -142,7 +140,6 @@ JoinColumn ColumnFetcher::makeJoinColumn(
         effective_mem_lvl,
         effective_mem_lvl == Data_Namespace::CPU_LEVEL ? 0 : device_id,
         device_allocator,
-        thread_idx,
         chunks_owner,
         data_provider,
         column_cache);
@@ -364,8 +361,7 @@ const int8_t* ColumnFetcher::linearizeColumnFragments(
     std::list<ChunkIter>& chunk_iter_holder,
     const Data_Namespace::MemoryLevel memory_level,
     const int device_id,
-    DeviceAllocator* device_allocator,
-    const size_t thread_idx) const {
+    DeviceAllocator* device_allocator) const {
   auto timer = DEBUG_TIMER(__func__);
   int db_id = col_info->db_id;
   int table_id = col_info->table_id;
@@ -477,8 +473,7 @@ const int8_t* ColumnFetcher::linearizeColumnFragments(
                                              total_data_buf_size,
                                              total_idx_buf_size,
                                              total_num_tuples,
-                                             device_allocator,
-                                             thread_idx);
+                                             device_allocator);
       } else {
         CHECK(type->isVarLenArray());
         VLOG(2) << "Linearize variable-length multi-frag array column (col_id: " << col_id
@@ -496,8 +491,7 @@ const int8_t* ColumnFetcher::linearizeColumnFragments(
                                            total_data_buf_size,
                                            total_idx_buf_size,
                                            total_num_tuples,
-                                           device_allocator,
-                                           thread_idx);
+                                           device_allocator);
       }
     }
     if (type->isString()) {
@@ -516,8 +510,7 @@ const int8_t* ColumnFetcher::linearizeColumnFragments(
                                          total_data_buf_size,
                                          total_idx_buf_size,
                                          total_num_tuples,
-                                         device_allocator,
-                                         thread_idx);
+                                         device_allocator);
     }
   }
   CHECK(res.first);  // check merged data buffer
@@ -573,8 +566,7 @@ MergedChunk ColumnFetcher::linearizeVarLenArrayColFrags(
     const size_t total_data_buf_size,
     const size_t total_idx_buf_size,
     const size_t total_num_tuples,
-    DeviceAllocator* device_allocator,
-    const size_t thread_idx) const {
+    DeviceAllocator* device_allocator) const {
   // for linearization of varlen col we have to deal with not only data buffer
   // but also its underlying index buffer which is responsible for offset of varlen value
   // basically we maintain per-device linearized (data/index) buffer
@@ -902,8 +894,7 @@ MergedChunk ColumnFetcher::linearizeFixedLenArrayColFrags(
     const size_t total_data_buf_size,
     const size_t total_idx_buf_size,
     const size_t total_num_tuples,
-    DeviceAllocator* device_allocator,
-    const size_t thread_idx) const {
+    DeviceAllocator* device_allocator) const {
   int64_t linearization_time_ms = 0;
   auto clock_begin = timer_start();
   // linearize collected fragments

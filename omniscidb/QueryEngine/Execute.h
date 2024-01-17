@@ -572,7 +572,7 @@ class Executor : public StringDictionaryProvider {
   std::pair<std::vector<std::vector<int64_t>>, std::vector<std::vector<uint64_t>>>
   getRowCountAndOffsetForAllFrags(
       const RelAlgExecutionUnit& ra_exe_unit,
-      const CartesianProduct<std::vector<std::vector<size_t>>>& frag_ids_crossjoin,
+      const std::vector<std::vector<size_t>>& frag_ids_crossjoin,
       const std::vector<InputDescriptor>& input_descs,
       const std::map<TableRef, const TableFragments*>& all_tables_fragments);
 

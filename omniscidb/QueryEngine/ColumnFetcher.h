@@ -46,7 +46,6 @@ class ColumnFetcher {
       const Data_Namespace::MemoryLevel effective_mem_lvl,
       const int device_id,
       DeviceAllocator* device_allocator,
-      const size_t thread_idx,
       std::vector<std::shared_ptr<Chunk_NS::Chunk>>& chunks_owner,
       DataProvider* data_provider,
       ColumnCacheMap& column_cache);
@@ -59,7 +58,6 @@ class ColumnFetcher {
       const Data_Namespace::MemoryLevel effective_mem_lvl,
       const int device_id,
       DeviceAllocator* device_allocator,
-      const size_t thread_idx,
       std::vector<std::shared_ptr<Chunk_NS::Chunk>>& chunks_owner,
       std::vector<std::shared_ptr<void>>& malloc_owner,
       DataProvider* data_provider,
@@ -90,8 +88,7 @@ class ColumnFetcher {
       std::list<ChunkIter>& chunk_iter_holder,
       const Data_Namespace::MemoryLevel memory_level,
       const int device_id,
-      DeviceAllocator* device_allocator,
-      const size_t thread_idx) const;
+      DeviceAllocator* device_allocator) const;
 
   void freeTemporaryCpuLinearizedIdxBuf();
   void freeLinearizedBuf();
@@ -118,8 +115,7 @@ class ColumnFetcher {
       const size_t total_data_buf_size,
       const size_t total_idx_buf_size,
       const size_t total_num_tuples,
-      DeviceAllocator* device_allocator,
-      const size_t thread_idx) const;
+      DeviceAllocator* device_allocator) const;
 
   MergedChunk linearizeFixedLenArrayColFrags(
       std::list<std::shared_ptr<Chunk_NS::Chunk>>& chunk_holder,
@@ -133,8 +129,7 @@ class ColumnFetcher {
       const size_t total_data_buf_size,
       const size_t total_idx_buf_size,
       const size_t total_num_tuples,
-      DeviceAllocator* device_allocator,
-      const size_t thread_idx) const;
+      DeviceAllocator* device_allocator) const;
 
   void addMergedChunkIter(const int table_id,
                           const int col_id,

@@ -865,7 +865,7 @@ std::shared_ptr<L0CompilationContext> L0Backend::generateNativeGPUCode(
   CHECK(module);
   CHECK(wrapper_func);
 
-  DUMP_MODULE(module, "before.linking.spirv.ll")
+  // DUMP_MODULE(module, "before.linking.spirv.ll")
 
   CHECK(exts.find(ExtModuleKinds::spirv_helper_funcs_module) != exts.end());
 
@@ -884,7 +884,7 @@ std::shared_ptr<L0CompilationContext> L0Backend::generateNativeGPUCode(
     }
   }
 
-  DUMP_MODULE(module, "after.linking.spirv.ll")
+  // DUMP_MODULE(module, "after.linking.spirv.ll")
 
   // set proper calling conv & mangle spirv built-ins
   for (auto& Fn : *module) {

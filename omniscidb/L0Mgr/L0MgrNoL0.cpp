@@ -69,6 +69,25 @@ void L0Manager::copyHostToDevice(int8_t* device_ptr,
                                  const int device_num) {
   CHECK(false);
 }
+
+void L0Manager::copyHostToDeviceAsyncIfPossible(int8_t* device_ptr,
+                                                const int8_t* host_ptr,
+                                                const size_t num_bytes,
+                                                const int device_num) {
+  CHECK(false);
+}
+
+void L0Manager::copyHostToDeviceAsync(int8_t* device_ptr,
+                                      const int8_t* host_ptr,
+                                      const size_t num_bytes,
+                                      const int device_num) {
+  CHECK(false);
+}
+
+void L0Manager::synchronizeDeviceDataStream(const int device_num) {
+  CHECK(false);
+}
+
 void L0Manager::copyDeviceToHost(int8_t* host_ptr,
                                  const int8_t* device_ptr,
                                  const size_t num_bytes,

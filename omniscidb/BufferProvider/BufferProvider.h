@@ -44,7 +44,7 @@ class BufferProvider {
                                  const int8_t* host_ptr,
                                  const size_t num_bytes,
                                  const int device_id) const = 0;
-  virtual void synchronizeStream(const int device_id) const = 0;
+  virtual void synchronizeDeviceDataStream(const int device_id) const = 0;
   virtual void copyFromDevice(int8_t* host_ptr,
                               const int8_t* device_ptr,
                               const size_t num_bytes,

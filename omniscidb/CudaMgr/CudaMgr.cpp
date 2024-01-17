@@ -112,6 +112,17 @@ void CudaMgr::copyHostToDevice(int8_t* device_ptr,
       cuMemcpyHtoD(reinterpret_cast<CUdeviceptr>(device_ptr), host_ptr, num_bytes));
 }
 
+void CudaMgr::copyHostToDeviceAsyncIfPossible(int8_t* device_ptr,
+                                              const int8_t* host_ptr,
+                                              const size_t num_bytes,
+                                              const int device_num) {
+  if constexpr (async_data_load_available) {
+    copyHostToDeviceAsync(device_ptr, host_ptr, num_bytes, device_num);
+  } else {
+    copyHostToDevice(device_ptr, host_ptr, num_bytes, device_num);
+  }
+}
+
 void CudaMgr::copyHostToDeviceAsync(int8_t* device_ptr,
                                     const int8_t* host_ptr,
                                     const size_t num_bytes,
@@ -120,7 +131,7 @@ void CudaMgr::copyHostToDeviceAsync(int8_t* device_ptr,
   checkError(cuMemcpyHtoDAsync(
       reinterpret_cast<CUdeviceptr>(device_ptr), host_ptr, num_bytes, stream_));
 }
-void CudaMgr::synchronizeStream(const int device_num) {
+void CudaMgr::synchronizeDeviceDataStream(const int device_num) {
   setContext(device_num);
   checkError(cuStreamSynchronize(stream_));
 }

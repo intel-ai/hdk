@@ -1154,7 +1154,6 @@ std::unique_ptr<WindowFunctionContext> RelAlgExecutor::createWindowFunctionConte
                                             memory_level,
                                             0,
                                             nullptr,
-                                            /*thread_idx=*/0,
                                             chunks_owner,
                                             data_provider_,
                                             column_cache_map);

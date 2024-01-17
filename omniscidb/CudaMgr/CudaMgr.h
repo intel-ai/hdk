@@ -96,12 +96,17 @@ class CudaMgr : public GpuMgr {
                         const size_t num_bytes,
                         const int device_num) override;
 
+  void copyHostToDeviceAsyncIfPossible(int8_t* device_ptr,
+                                       const int8_t* host_ptr,
+                                       const size_t num_bytes,
+                                       const int device_num) override;
+
   void copyHostToDeviceAsync(int8_t* device_ptr,
                              const int8_t* host_ptr,
                              const size_t num_bytes,
                              const int device_num) override;
 
-  void synchronizeStream(const int device_num) override;
+  void synchronizeDeviceDataStream(const int device_num) override;
 
   void copyDeviceToHost(int8_t* host_ptr,
                         const int8_t* device_ptr,
@@ -289,7 +294,7 @@ class CudaMgr : public GpuMgr {
   omnisci::DeviceGroup device_group_;
   std::vector<CUcontext> device_contexts_;
   mutable std::mutex device_cleanup_mutex_;
-  static constexpr bool async_data_load_available{true};
+  static constexpr bool async_data_load_available{false};
 };
 
 }  // Namespace CudaMgr_Namespace

@@ -84,3 +84,7 @@ void GpuAllocator::setDeviceMem(int8_t* device_ptr,
                                 const size_t num_bytes) const {
   buffer_provider_->setDeviceMem(device_ptr, uc, num_bytes, device_id_);
 }
+
+void GpuAllocator::sync() {
+  buffer_provider_->synchronizeDeviceDataStream(device_id_);
+}

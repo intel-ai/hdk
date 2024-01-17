@@ -52,7 +52,6 @@ JoinColumn HashJoin::fetchJoinColumn(
                                                            effective_memory_level,
                                                            device_id,
                                                            dev_buff_owner,
-                                                           /*thread_idx=*/0,
                                                            chunks_owner,
                                                            malloc_owner,
                                                            data_provider_,

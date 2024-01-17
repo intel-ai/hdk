@@ -53,4 +53,5 @@ class DeviceAllocator : public Allocator {
   virtual void setDeviceMem(int8_t* device_ptr,
                             unsigned char uc,
                             const size_t num_bytes) const = 0;
+  virtual void sync() = 0;
 };
